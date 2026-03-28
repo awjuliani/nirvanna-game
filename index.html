@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nirvanna The Band The Show The Movie The Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;font-family:'Courier New',monospace}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const T = 32, COLS = 20, ROWS = 15;
+canvas.width = COLS * T; canvas.height = ROWS * T;
+function fitCanvas() {
+    const r = canvas.width/canvas.height;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w/h > r) w = h*r; else h = w/r;
+    canvas.style.width = w+'px'; canvas.style.height = h+'px';
+}
+window.addEventListener('resize', fitCanvas); fitCanvas();
+
+// ================================================================
+// CONSTANTS
+// ================================================================
+const ANIM_TIME = 0.1;          // seconds for move animation lerp
+const VIEW_SCALE = 2.0;
+const GHOST_ENTRY_DELAY = 10;   // ticks between each ghost entering
+
+const NPC_WAYPOINTS = [
+    {x:4,y:2},{x:15,y:2},{x:12,y:10},{x:7,y:3},
+];
+
+// ================================================================
+// MAP (0=floor, 1=wall, 2=furniture)
+// ================================================================
+const MAP = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,1],
+    [1,0,2,2,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,1,0,2,0,0,0,0,2,0,0,2,0,0,1],
+    [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,1],
+    [1,1,0,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],
+    [1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,1,0,1,1,1],
+    [1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,1],
+    [1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,2,0,0,0,1],
+    [1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+const ROOMS = [
+    {name:'Bedroom',    x1:1,y1:1,x2:5,y2:4, floor:'#7a6652'},
+    {name:'Bathroom',   x1:7,y1:1,x2:9,y2:4, floor:'#5a7a7f'},
+    {name:'Kitchen',    x1:11,y1:1,x2:18,y2:4,floor:'#8a7a5a'},
+    {name:'Hallway',    x1:1,y1:6,x2:18,y2:7, floor:'#6a6a62'},
+    {name:'Closet',     x1:1,y1:9,x2:3,y2:11, floor:'#55554a'},
+    {name:'Living Room',x1:5,y1:9,x2:18,y2:12,floor:'#7a7060'},
+    {name:'Entry',      x1:9,y1:13,x2:10,y2:13,floor:'#6a6a62'},
+];
+const DOOR_DEFS = [
+    {x:6,y:2,id:'bed_bath'},{x:10,y:3,id:'bath_kit'},
+    {x:2,y:5,id:'bed_hall'},{x:8,y:5,id:'bath_hall'},{x:15,y:5,id:'kit_hall'},
+    {x:2,y:8,id:'closet_hall'},{x:6,y:8,id:'liv_hall_L'},{x:16,y:8,id:'liv_hall_R'},
+    {x:4,y:10,id:'closet_liv'},
+];
+const HIDING_DEFS = [
+    {x:4,y:3,id:'bed',name:'Under Bed'},
+    {x:1,y:10,id:'closet',name:'In Closet'},
+    {x:9,y:11,id:'couch',name:'Behind Couch'},
+    {x:7,y:4,id:'shower',name:'In Shower'},
+];
+const ORBITZ_CANDIDATES = [];
+for (let y=0;y<ROWS;y++) for (let x=0;x<COLS;x++) {
+    if (MAP[y][x]!==0) continue;
+    if (x>=8&&x<=11&&y>=12) continue;
+    if (DOOR_DEFS.some(d=>d.x===x&&d.y===y)) continue;
+    if (HIDING_DEFS.some(h=>h.x===x&&h.y===y)) continue;
+    ORBITZ_CANDIDATES.push({x,y});
+}
+function pickOrbitzPos() {
+    return ORBITZ_CANDIDATES[Math.floor(Math.random()*ORBITZ_CANDIDATES.length)];
+}
+
+// ================================================================
+// DIALOGUE
+// ================================================================
+function generateDialogue() {
+    if (G.round<=1) return null;
+    const n = G.recordings.length;
+    const pool = [
+        ["Matt: There's another one of me in there.","Jay: YOU'RE another one of you, Matt."],
+        ["Jay: How many of you are there now?","Matt: "+(n+1)+". Plus the original me.","Jay: This is getting out of hand."],
+        ["Matt: I keep almost bumping into myself.","Jay: That's literally the whole problem."],
+        ["Jay: Maybe go faster this time?","Matt: Then future-me has less to dodge. Smart."],
+        ["Matt: What if I just stand still?","Jay: Then THAT becomes a ghost too.","Matt: ...right."],
+        ["Jay: Do something you'd never do.","Matt: Everything I do becomes something I did!"],
+        ["Matt: I'm running out of new routes.","Jay: Then make this one count."],
+    ];
+    if (n>=3) pool.push(["Matt: It's getting crowded in there.","Jay: It's all you, Matt. It's always been you."]);
+    if (n>=5) pool.push(["Jay: "+(n+1)+" versions of you in one apartment.","Matt: At least we all have good taste in hats."]);
+    return pool[Math.floor(Math.random()*pool.length)];
+}
+
+// ================================================================
+// GAME STATE
+// ================================================================
+const G = {
+    state:'title', round:1, bestRound:0,
+    currentDialogue:null, screenTimer:0, screenGuard:0.5,
+    // Turn
+    animTimer:1, turnCount:0, // animTimer starts at 1 (fully settled)
+    // Player (grid coords)
+    px:9, py:12, ppx:9, ppy:12,
+    pfx:0, pfy:-1,
+    hidden:false, hasOrbitz:false,
+    // NPC
+    npc:{x:4,y:2,px:4,py:2,fx:1,fy:0,path:[],waypointIdx:0},
+    // Ghosts & recordings
+    ghosts:[], recordings:[], recSamples:[],
+    // Doors
+    doors:[],
+    // Orbitz
+    orbX:15, orbY:2,
+    // Input
+    keys:{}, spaceJust:false, inputQueue:[],
+    // Anim
+    glowT:0,
+};
+function initGame() { G.recordings=[]; G.bestRound=0; }
+
+// ================================================================
+// INPUT
+// ================================================================
+const keyMap = {
+    'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right',
+    'w':'up','s':'down','a':'left','d':'right',
+    'W':'up','S':'down','A':'left','D':'right',
+    ' ':'space','Enter':'space',
+};
+window.addEventListener('keydown', e => {
+    if (e.key===' '||e.key==='ArrowUp'||e.key==='ArrowDown') e.preventDefault();
+    const k = keyMap[e.key];
+    if (!k) return;
+    G.keys[k]=true;
+    if (k==='space') G.spaceJust=true;
+    // Queue actions for turn-based processing
+    if (G.inputQueue.length<2) {
+        if (k==='space'&&!e.repeat) G.inputQueue.push({type:'interact'});
+        else if (k==='up') G.inputQueue.push({type:'move',dx:0,dy:-1});
+        else if (k==='down') G.inputQueue.push({type:'move',dx:0,dy:1});
+        else if (k==='left') G.inputQueue.push({type:'move',dx:-1,dy:0});
+        else if (k==='right') G.inputQueue.push({type:'move',dx:1,dy:0});
+    }
+});
+window.addEventListener('keyup', e => { const k=keyMap[e.key]; if(k) G.keys[k]=false; });
+let screenKeyReady = false;
+window.addEventListener('keyup', ()=>{ screenKeyReady=true; });
+function consumeScreenKey() {
+    if (G.spaceJust) { screenKeyReady=false; return true; }
+    if (screenKeyReady) { for (const k of Object.values(G.keys)) if(k){screenKeyReady=false;return true;} }
+    return false;
+}
+
+// ================================================================
+// UTILITY & COLLISION
+// ================================================================
+function getRoomAt(x,y){for(const r of ROOMS)if(x>=r.x1&&x<=r.x2&&y>=r.y1&&y<=r.y2)return r;return null;}
+function getDoor(x,y){return G.doors.find(d=>d.x===x&&d.y===y);}
+function isBlocked(tx,ty){
+    if(tx<0||tx>=COLS||ty<0||ty>=ROWS)return true;
+    if(MAP[ty][tx]!==0)return true;
+    const d=getDoor(tx,ty);if(d&&!d.open)return true;
+    return false;
+}
+
+// ================================================================
+// PATHFINDING
+// ================================================================
+function findPath(sx,sy,gx,gy){
+    sx=Math.round(sx);sy=Math.round(sy);gx=Math.round(gx);gy=Math.round(gy);
+    if(sx===gx&&sy===gy)return[];
+    if(MAP[gy]===undefined||MAP[gy][gx]!==0)return null;
+    const visited=new Set(),parent=new Map();
+    const queue=[`${sx},${sy}`];visited.add(queue[0]);
+    const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+    while(queue.length>0){
+        const key=queue.shift();
+        const[cx,cy]=key.split(',').map(Number);
+        if(cx===gx&&cy===gy){
+            const path=[];let k=key;
+            while(parent.has(k)){const[px,py]=k.split(',').map(Number);path.unshift({x:px,y:py});k=parent.get(k);}
+            return path;
+        }
+        for(const[dx,dy]of dirs){
+            const nx=cx+dx,ny=cy+dy,nk=`${nx},${ny}`;
+            if(!visited.has(nk)&&ny>=0&&ny<ROWS&&nx>=0&&nx<COLS&&MAP[ny][nx]===0){
+                visited.add(nk);parent.set(nk,key);queue.push(nk);
+            }
+        }
+    }
+    return null;
+}
+
+// ================================================================
+// VISION & DETECTION (3-wide, 2-deep box in front, blocked by walls/doors)
+// ================================================================
+function getVisionTiles(ex,ey,efx,efy){
+    const tiles=[];
+    const sx=-efy,sy=efx; // perpendicular axis
+    for(let f=1;f<=2;f++){
+        for(let s=-1;s<=1;s++){
+            const tx=ex+efx*f+sx*s, ty=ey+efy*f+sy*s;
+            if(tx<0||tx>=COLS||ty<0||ty>=ROWS)continue;
+            // Row 2: blocked if the tile directly in front (row 1, same side offset) is blocked
+            if(f===2){
+                const fx1=ex+efx+sx*s, fy1=ey+efy+sy*s;
+                if(isBlocked(fx1,fy1))continue;
+            }
+            if(isBlocked(tx,ty))continue;
+            tiles.push({x:tx,y:ty});
+        }
+    }
+    return tiles;
+}
+function isSeenBy(ex,ey,efx,efy){
+    if(G.hidden)return false;
+    if(ex===G.px&&ey===G.py)return true; // same tile
+    const tiles=getVisionTiles(ex,ey,efx,efy);
+    return tiles.some(t=>t.x===G.px&&t.y===G.py);
+}
+function checkDetection(){
+    if(isSeenBy(G.npc.x,G.npc.y,G.npc.fx,G.npc.fy)){triggerCaught();return;}
+    for(const ghost of G.ghosts){
+        if(!ghost.active)continue;
+        if(isSeenBy(ghost.x,ghost.y,ghost.fx,ghost.fy)){triggerCaught();return;}
+    }
+}
+
+// ================================================================
+// TURN SYSTEM — everything moves when the player acts
+// ================================================================
+function executeTurn(input){
+    // Save prev positions for animation lerp
+    G.ppx=G.px;G.ppy=G.py;
+    G.npc.px=G.npc.x;G.npc.py=G.npc.y;
+    for(const g of G.ghosts){g.px=g.x;g.py=g.y;}
+
+    // Player action
+    if(input.type==='move'&&!G.hidden){
+        G.pfx=input.dx;G.pfy=input.dy;
+        const nx=G.px+input.dx,ny=G.py+input.dy;
+        if(!isBlocked(nx,ny)){G.px=nx;G.py=ny;}
+    } else if(input.type==='interact'){
+        tryInteract();
+    }
+
+    // Auto-pickup Orbitz
+    if(!G.hasOrbitz&&G.px===G.orbX&&G.py===G.orbY) G.hasOrbitz=true;
+
+    // Advance NPC (every turn, same speed as player and ghosts)
+    G.turnCount++;
+    const npc=G.npc;
+    if(npc.path.length===0){
+        npc.waypointIdx=(npc.waypointIdx+1)%NPC_WAYPOINTS.length;
+        const wp=NPC_WAYPOINTS[npc.waypointIdx];
+        npc.path=findPath(npc.x,npc.y,wp.x,wp.y)||[];
+    }
+    if(npc.path.length>0){
+        const next=npc.path[0];
+        const door=getDoor(next.x,next.y);
+        if(door&&!door.open){door.open=true;}
+        else{
+            const dfx=next.x-npc.x,dfy=next.y-npc.y;
+            if(dfx!==0||dfy!==0){npc.fx=dfx;npc.fy=dfy;}
+            npc.x=next.x;npc.y=next.y;
+            npc.path.shift();
+        }
+    }
+
+    // Advance ghosts
+    for(const ghost of G.ghosts){
+        if(G.turnCount<ghost.startTurn)continue;
+        if(!ghost.entered){ghost.entered=true;ghost.active=true;ghost.recIdx=0;continue;}
+        ghost.recIdx++;
+        const samples=ghost.recording.samples;
+        if(ghost.recIdx>=samples.length){ghost.active=false;continue;}
+        const s=samples[ghost.recIdx];
+        ghost.x=s.x;ghost.y=s.y;ghost.fx=s.fx;ghost.fy=s.fy;
+    }
+
+    // Record player position
+    G.recSamples.push({x:G.px,y:G.py,fx:G.pfx,fy:G.pfy});
+
+    // Reset animation timer
+    G.animTimer=0;
+
+    // Check detection & exit
+    checkDetection();
+    if(G.state==='playing'&&G.hasOrbitz&&isAtExit())triggerSuccess();
+}
+
+// ================================================================
+// PLAYER INTERACTION
+// ================================================================
+function tryInteract(){
+    // Unhide
+    if(G.hidden){G.hidden=false;return;}
+    // Door (tile we're facing)
+    const dx=G.px+G.pfx,dy=G.py+G.pfy;
+    let door=getDoor(dx,dy);
+    if(!door) door=getDoor(G.px,G.py);
+    if(door){door.open=!door.open;return;}
+    // Hiding (same tile)
+    for(const spot of HIDING_DEFS){
+        if(G.px===spot.x&&G.py===spot.y){G.hidden=true;return;}
+    }
+}
+
+function isAtExit(){return(G.px===9||G.px===10)&&G.py===13;}
+
+// ================================================================
+// ROUND MANAGEMENT
+// ================================================================
+function startRound(round){
+    G.round=round;G.state='playing';G.hasOrbitz=false;
+    G.px=9;G.py=12;G.ppx=9;G.ppy=12;G.pfx=0;G.pfy=-1;
+    G.hidden=false;
+    G.animTimer=1;G.turnCount=0;
+    // NPC
+    G.npc={x:4,y:2,px:4,py:2,fx:1,fy:0,path:[],waypointIdx:0};
+    // Ghosts with staggered entry
+    G.ghosts=G.recordings.map((rec,i)=>({
+        recording:rec,startTurn:(i+1)*GHOST_ENTRY_DELAY,
+        entered:false,active:false,recIdx:0,
+        x:9,y:12,px:9,py:12,fx:0,fy:-1,
+    }));
+    G.doors=DOOR_DEFS.map(d=>({...d,open:true}));
+    const orb=pickOrbitzPos();G.orbX=orb.x;G.orbY=orb.y;
+    G.recSamples=[];G.inputQueue=[];
+}
+function triggerCaught(){G.state='caught';G.screenGuard=0.5;}
+function triggerSuccess(){
+    G.recordings.push({samples:G.recSamples.slice()});
+    if(G.round>G.bestRound)G.bestRound=G.round;
+    G.state='success';G.screenTimer=1.2;
+}
+
+// ================================================================
+// RENDERING — MAP
+// ================================================================
+const WALL_COLOR='#2a1e14',DOOR_CLOSED='#5a4030',DOOR_OPEN='#4a4040';
+function renderMap(){
+    for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+        const sx=x*T,sy=y*T,tile=MAP[y][x];
+        if(tile===1){
+            ctx.fillStyle=WALL_COLOR;ctx.fillRect(sx,sy,T,T);
+            ctx.fillStyle='#3a2e20';ctx.fillRect(sx,sy,T,2);ctx.fillRect(sx,sy,2,T);
+        }else if(tile===2){
+            const room=getRoomAt(x,y);ctx.fillStyle=room?room.floor:'#6a6a62';ctx.fillRect(sx,sy,T,T);
+            ctx.fillStyle='#4a3828';ctx.fillRect(sx+3,sy+3,T-6,T-6);
+            ctx.fillStyle='#5a4838';ctx.fillRect(sx+5,sy+5,T-10,T-10);
+        }else{
+            const room=getRoomAt(x,y);ctx.fillStyle=room?room.floor:'#6a6a62';ctx.fillRect(sx,sy,T,T);
+            ctx.strokeStyle='rgba(0,0,0,0.1)';ctx.strokeRect(sx,sy,T,T);
+        }
+    }
+    ctx.font='9px monospace';ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,0.2)';
+    for(const r of ROOMS){ctx.fillText(r.name,((r.x1+r.x2)/2+0.5)*T,((r.y1+r.y2)/2+0.5)*T);}
+    for(const h of HIDING_DEFS){
+        ctx.fillStyle='rgba(100,150,255,0.15)';ctx.fillRect(h.x*T+2,h.y*T+2,T-4,T-4);
+        ctx.font='10px monospace';ctx.textAlign='center';ctx.fillStyle='rgba(100,150,255,0.35)';
+        ctx.fillText('\u25C6',h.x*T+T/2,h.y*T+T/2+4);
+    }
+    for(const door of G.doors){
+        const sx=door.x*T,sy=door.y*T;
+        if(door.open){
+            const room=getRoomAt(door.x,door.y);ctx.fillStyle=room?room.floor:'#6a6a62';ctx.fillRect(sx,sy,T,T);
+            ctx.fillStyle=DOOR_OPEN;ctx.fillRect(sx,sy,3,T);ctx.fillRect(sx+T-3,sy,3,T);
+        }else{
+            ctx.fillStyle=DOOR_CLOSED;ctx.fillRect(sx,sy,T,T);ctx.fillStyle='#6a5040';ctx.fillRect(sx+2,sy+2,T-4,T-4);
+            ctx.fillStyle='#aa9060';ctx.beginPath();ctx.arc(sx+T-8,sy+T/2,2,0,Math.PI*2);ctx.fill();
+        }
+    }
+    // Exit glow when carrying Orbitz
+    if(G.hasOrbitz){
+        const pulse=0.5+0.5*Math.sin(G.glowT*5);
+        ctx.fillStyle=`rgba(170,255,0,${0.15+0.1*pulse})`;
+        ctx.fillRect(9*T,13*T,T,T);ctx.fillRect(10*T,13*T,T,T);
+        ctx.font='8px monospace';ctx.textAlign='center';
+        ctx.fillStyle=`rgba(170,255,0,${0.4+0.3*pulse})`;
+        ctx.fillText('EXIT',9.5*T+T/2,13*T+T/2+3);
+    }
+}
+
+// ================================================================
+// RENDERING — ORBITZ BOTTLE
+// ================================================================
+const ORB_BALLS=[
+    {rx:0.2,ry:0.15,color:'#ff66aa',r:1.8},{rx:-0.15,ry:-0.1,color:'#66ccff',r:1.5},
+    {rx:0.05,ry:0.3,color:'#ffaa33',r:1.6},{rx:-0.1,ry:0.0,color:'#aa66ff',r:1.4},
+    {rx:0.18,ry:-0.25,color:'#66ff99',r:1.7},{rx:-0.2,ry:0.22,color:'#ff6666',r:1.3},
+    {rx:0.0,ry:-0.18,color:'#ffff66',r:1.5},{rx:0.12,ry:0.08,color:'#66aaff',r:1.2},
+];
+function drawOrbitzBottle(cx,cy,s){
+    s=s||1;const bw=7*s,bh=13*s,nw=3*s,nh=5*s;
+    const pulse=0.85+0.15*Math.sin(G.glowT*3);
+    const grad=ctx.createRadialGradient(cx,cy,2,cx,cy,22*pulse*s);
+    grad.addColorStop(0,'rgba(180,220,255,0.4)');grad.addColorStop(1,'rgba(180,220,255,0)');
+    ctx.fillStyle=grad;ctx.beginPath();ctx.arc(cx,cy,22*pulse*s,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(200,230,255,0.25)';ctx.strokeStyle='rgba(200,230,255,0.6)';ctx.lineWidth=1.2*s;
+    ctx.beginPath();
+    ctx.moveTo(cx-bw,cy-bh+3*s);ctx.quadraticCurveTo(cx-bw,cy-bh,cx-bw+2*s,cy-bh);
+    ctx.lineTo(cx+bw-2*s,cy-bh);ctx.quadraticCurveTo(cx+bw,cy-bh,cx+bw,cy-bh+3*s);
+    ctx.lineTo(cx+bw,cy+bh-3*s);ctx.quadraticCurveTo(cx+bw,cy+bh,cx+bw-2*s,cy+bh);
+    ctx.lineTo(cx-bw+2*s,cy+bh);ctx.quadraticCurveTo(cx-bw,cy+bh,cx-bw,cy+bh-3*s);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.fillStyle='rgba(200,230,255,0.2)';ctx.beginPath();
+    ctx.moveTo(cx-nw,cy-bh);ctx.lineTo(cx-nw,cy-bh-nh);ctx.lineTo(cx+nw,cy-bh-nh);ctx.lineTo(cx+nw,cy-bh);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle='rgba(220,200,100,0.8)';ctx.fillRect(cx-nw-s,cy-bh-nh-2*s,(nw+s)*2,2.5*s);
+    for(const ball of ORB_BALLS){
+        const bx=cx+ball.rx*bw*1.4,floatY=Math.sin(G.glowT*1.5+ball.rx*10+ball.ry*7)*2*s;
+        ctx.fillStyle=ball.color;ctx.globalAlpha=0.85;
+        ctx.beginPath();ctx.arc(bx,cy+ball.ry*bh*1.2+floatY,ball.r*s,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+    }
+    ctx.fillStyle='rgba(255,255,255,0.15)';ctx.fillRect(cx-bw+1.5*s,cy-bh+2*s,2.5*s,bh*1.6);
+    ctx.font=`${5*s}px monospace`;ctx.textAlign='center';ctx.fillStyle='rgba(200,230,255,0.5)';
+    ctx.fillText('ORBITZ',cx,cy+6*s);
+}
+function renderOrbitz(){if(G.hasOrbitz)return;drawOrbitzBottle((G.orbX+0.5)*T,(G.orbY+0.5)*T,1);}
+
+// ================================================================
+// RENDERING — ENTITIES
+// ================================================================
+function lerpPos(px,py,cx,cy,t){return{x:px+(cx-px)*t,y:py+(cy-py)*t};}
+
+function drawVisionBox(ex,ey,fx,fy,color){
+    // ex,ey are integer grid coords (logical position, not visual lerped)
+    const tiles=getVisionTiles(Math.round(ex),Math.round(ey),fx,fy);
+    ctx.save();ctx.globalAlpha=0.12;ctx.fillStyle=color;
+    for(const t of tiles)ctx.fillRect(t.x*T,t.y*T,T,T);
+    ctx.restore();
+}
+function drawEntity(vx,vy,fx,fy,color,glow){
+    const cx=(vx+0.5)*T,cy=(vy+0.5)*T;
+    ctx.fillStyle='rgba(0,0,0,0.3)';ctx.beginPath();ctx.ellipse(cx,cy+4,8,4,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=color;ctx.beginPath();ctx.arc(cx,cy,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=glow;ctx.beginPath();ctx.arc(cx+fx*12,cy+fy*12,4,0,Math.PI*2);ctx.fill();
+}
+function drawFedora(vx,vy,fx,fy,brim,crown,band){
+    const cx=(vx+0.5)*T+fx*1.5,cy=(vy+0.5)*T+fy*1.5;
+    ctx.fillStyle=brim||'#2a2a38';ctx.beginPath();ctx.ellipse(cx,cy-1,13,11,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=crown||'#353548';ctx.beginPath();ctx.ellipse(cx,cy-2,8,6.5,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#252535';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(cx-5,cy-2);ctx.lineTo(cx+5,cy-2);ctx.stroke();
+    ctx.strokeStyle=band||'#5577aa';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(cx,cy-2,9,7,0,0,Math.PI*2);ctx.stroke();
+}
+
+function renderPlayer(t){
+    const v=lerpPos(G.ppx,G.ppy,G.px,G.py,t);
+    const alpha=G.hidden?0.3:1;ctx.globalAlpha=alpha;
+    drawEntity(v.x,v.y,G.pfx,G.pfy,'#4488ff','#88bbff');
+    drawFedora(v.x,v.y,G.pfx,G.pfy);
+    if(G.hasOrbitz)drawOrbitzBottle((v.x+0.5)*T+8,(v.y+0.5)*T-10,0.35);
+    ctx.globalAlpha=1;
+}
+function renderNPC(t){
+    const n=G.npc,v=lerpPos(n.px,n.py,n.x,n.y,t);
+    drawVisionBox(n.x,n.y,n.fx,n.fy,'#ff6633');
+    drawEntity(v.x,v.y,n.fx,n.fy,'#ff5533','#ff9966');
+    drawFedora(v.x,v.y,n.fx,n.fy,'#3a2a20','#4a3530','#aa6633');
+}
+function renderGhosts(t){
+    for(const ghost of G.ghosts){
+        if(!ghost.active)continue;
+        const v=lerpPos(ghost.px,ghost.py,ghost.x,ghost.y,t);
+        drawVisionBox(ghost.x,ghost.y,ghost.fx,ghost.fy,'#55cccc');
+        ctx.globalAlpha=0.45;
+        drawEntity(v.x,v.y,ghost.fx,ghost.fy,'#77bbbb','#99dddd');
+        drawFedora(v.x,v.y,ghost.fx,ghost.fy,'#2a3838','#354548','#55aaaa');
+        ctx.globalAlpha=1;
+    }
+}
+
+// ================================================================
+// HUD
+// ================================================================
+function renderHUD(){
+    const W=COLS*T,H=ROWS*T;
+    ctx.font='14px monospace';ctx.textAlign='left';
+    ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(4,4,90,22);
+    ctx.fillStyle='#ffffff';ctx.fillText('Round '+G.round,10,20);
+    if(G.recordings.length>0){
+        ctx.font='11px monospace';ctx.fillStyle='rgba(150,220,220,0.6)';
+        ctx.fillText((G.recordings.length+1)+' selves',10,38);
+    }
+    ctx.font='bold 13px monospace';ctx.textAlign='center';
+    if(!G.hasOrbitz){ctx.fillStyle='rgba(170,255,0,0.7)';ctx.fillText('FIND THE ORBITZ',W/2,H-10);}
+    else{const p=0.5+0.5*Math.sin(G.glowT*6);ctx.fillStyle=`rgba(170,255,0,${0.5+0.5*p})`;ctx.fillText('GET TO THE EXIT!',W/2,H-10);}
+    if(G.round===1&&G.turnCount<20){
+        ctx.font='11px monospace';ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,0.5)';
+        ctx.fillText('Arrows: Move    Space: Interact',W/2,H-28);
+    }
+    if(G.bestRound>0){ctx.font='10px monospace';ctx.textAlign='right';ctx.fillStyle='rgba(170,255,0,0.4)';ctx.fillText('Best: '+G.bestRound,W-8,H-8);}
+}
+
+// ================================================================
+// SCREENS
+// ================================================================
+function drawOverlay(a){ctx.fillStyle=`rgba(10,10,26,${a})`;ctx.fillRect(0,0,COLS*T,ROWS*T);}
+function drawCT(text,y,font,color){ctx.font=font;ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,COLS*T/2,y);}
+
+function renderTitle(){
+    drawOverlay(1);
+    drawCT('Nirvanna The Band',100,'bold 24px monospace','#aaff00');
+    drawCT('The Show The Movie',135,'bold 24px monospace','#aaff00');
+    drawCT('The Game',170,'bold 24px monospace','#aaff00');
+    drawCT('A Time Paradox Stealth Puzzle',220,'13px monospace','rgba(255,255,255,0.6)');
+    if(Math.sin(G.glowT*3)>0)drawCT('Press any key to start',310,'16px monospace','#ffffff');
+}
+function renderIntro(){
+    drawOverlay(1);
+    const lines=['The apartment. 2008.','','You need the Orbitz.','','Get in. Grab it. Get out.','','Don\'t let anyone see you.','','Not even yourself.'];
+    let y=100;for(const l of lines){
+        drawCT(l,y,l===''?'8px monospace':'15px monospace',l.includes('yourself')?'#aaff00':'rgba(255,255,255,0.85)');
+        y+=l===''?10:26;
+    }
+    if(Math.sin(G.glowT*3)>0)drawCT('Press any key',400,'13px monospace','rgba(255,255,255,0.5)');
+}
+function renderRoundIntro(){
+    drawOverlay(0.85);drawCT('ROUND '+G.round,180,'bold 36px monospace','#aaff00');
+    const orbRoom=getRoomAt(G.orbX,G.orbY);
+    drawCT('The Orbitz is in the '+(orbRoom?orbRoom.name:'apartment')+'.',225,'13px monospace','rgba(255,255,255,0.7)');
+    if(G.recordings.length>0){
+        drawCT((G.recordings.length+1)+' past selves inside.',255,'12px monospace','rgba(150,220,220,0.7)');
+    }else drawCT('Your past self is home.',255,'12px monospace','rgba(255,150,100,0.7)');
+    if(Math.sin(G.glowT*3)>0)drawCT('Press any key',340,'13px monospace','rgba(255,255,255,0.4)');
+}
+function renderDialogue(){
+    drawOverlay(0.9);const dlg=G.currentDialogue;if(!dlg)return;let y=160;
+    for(const l of dlg){const m=l.startsWith('Matt:');drawCT(l,y,'14px monospace',m?'#88aaff':'#ffaa66');y+=28;}
+    if(Math.sin(G.glowT*3)>0)drawCT('Press any key',380,'13px monospace','rgba(255,255,255,0.4)');
+}
+function renderCaught(){
+    drawOverlay(0.85);
+    drawCT('TIME PARADOX',200,'bold 36px monospace','#ff3333');
+    drawCT('One of your past selves saw you.',250,'14px monospace','rgba(255,255,255,0.7)');
+    if(G.round>1)drawCT('Made it to round '+G.round+'.',278,'12px monospace','rgba(255,255,255,0.5)');
+    drawCT('Timeline reset.',300,'12px monospace','rgba(255,255,255,0.4)');
+    if(Math.sin(G.glowT*3)>0)drawCT('Press any key',360,'13px monospace','rgba(255,255,255,0.4)');
+}
+function renderSuccess(){
+    drawOverlay(0.5);drawCT('GOT OUT!',200,'bold 32px monospace','#aaff00');
+    drawCT(G.round+' bottle'+(G.round>1?'s':'')+' collected',240,'14px monospace','rgba(255,255,255,0.6)');
+    drawCT('But now there\'s another you in there...',270,'11px monospace','rgba(150,220,220,0.6)');
+}
+
+// ================================================================
+// CAMERA & GAME VIEW
+// ================================================================
+function getCam(vx,vy){
+    const vw=(COLS*T)/VIEW_SCALE,vh=(ROWS*T)/VIEW_SCALE;
+    let cx=(vx+0.5)*T-vw/2,cy=(vy+0.5)*T-vh/2;
+    cx=Math.max(0,Math.min(cx,COLS*T-vw));cy=Math.max(0,Math.min(cy,ROWS*T-vh));
+    return{x:cx,y:cy};
+}
+function renderGameView(){
+    const t=Math.min(G.animTimer/ANIM_TIME,1);
+    const vp=lerpPos(G.ppx,G.ppy,G.px,G.py,t);
+    const cam=getCam(vp.x,vp.y);
+    ctx.save();ctx.scale(VIEW_SCALE,VIEW_SCALE);ctx.translate(-cam.x,-cam.y);
+    renderMap();renderOrbitz();renderGhosts(t);renderNPC(t);renderPlayer(t);
+    ctx.restore();
+}
+
+// ================================================================
+// UPDATE
+// ================================================================
+function update(dt){
+    G.glowT+=dt;if(G.screenGuard>0)G.screenGuard-=dt;
+    switch(G.state){
+    case 'title':
+        if(G.screenGuard<=0&&consumeScreenKey()){G.state='intro';G.screenGuard=0.3;}break;
+    case 'intro':
+        if(G.screenGuard<=0&&consumeScreenKey()){
+            initGame();G.round=1;
+            const o=pickOrbitzPos();G.orbX=o.x;G.orbY=o.y;
+            G.state='round_intro';G.screenGuard=0.3;
+        }break;
+    case 'round_intro':
+        if(G.screenGuard<=0&&consumeScreenKey()){startRound(G.round);G.screenGuard=0.3;}break;
+    case 'dialogue':
+        if(G.screenGuard<=0&&consumeScreenKey()){G.state='round_intro';G.screenGuard=0.3;}break;
+
+    case 'playing':
+        // Advance animation lerp
+        if(G.animTimer<ANIM_TIME) G.animTimer+=dt;
+        // Process next turn when animation is done and input is queued
+        if(G.inputQueue.length>0&&G.animTimer>=ANIM_TIME){
+            executeTurn(G.inputQueue.shift());
+        }
+        break;
+
+    case 'caught':
+        if(G.screenGuard<=0&&consumeScreenKey()){
+            initGame();G.round=1;
+            const o=pickOrbitzPos();G.orbX=o.x;G.orbY=o.y;
+            G.state='round_intro';G.screenGuard=0.3;
+        }break;
+    case 'success':
+        G.screenTimer-=dt;if(G.screenTimer<=0){
+            G.round++;const o=pickOrbitzPos();G.orbX=o.x;G.orbY=o.y;
+            G.currentDialogue=generateDialogue();
+            G.state=G.currentDialogue?'dialogue':'round_intro';G.screenGuard=0.3;
+        }break;
+    }
+    G.spaceJust=false;
+}
+
+// ================================================================
+// RENDER
+// ================================================================
+function render(){
+    ctx.clearRect(0,0,COLS*T,ROWS*T);
+    switch(G.state){
+    case 'title':renderTitle();break;
+    case 'intro':renderIntro();break;
+    case 'round_intro':renderRoundIntro();break;
+    case 'dialogue':renderDialogue();break;
+    case 'playing':renderGameView();renderHUD();break;
+    case 'caught':renderGameView();renderHUD();renderCaught();break;
+    case 'success':renderGameView();renderHUD();renderSuccess();break;
+    }
+}
+
+// ================================================================
+// GAME LOOP
+// ================================================================
+let lastTime=0;
+function gameLoop(ts){
+    const dt=Math.min((ts-lastTime)/1000,0.1);lastTime=ts;update(dt);render();requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(ts=>{lastTime=ts;gameLoop(ts);});
+</script>
+</body>
+</html>
