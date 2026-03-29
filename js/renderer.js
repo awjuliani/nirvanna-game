@@ -250,13 +250,19 @@ export function renderHUD() {
     ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff'; ctx.fillText('Round ' + G.round, 12, 21);
 
-    // Ghost count with mini fedora icons
+    // Step counter
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 30, 80, 18);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(4, 30, 3, 18);
+    ctx.font = '11px monospace'; ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('Steps: ' + G.turnCount, 12, 44);
+
+    // Ghost count
     if (G.recordings.length > 0) {
         const count = G.recordings.length + 1;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 30, 80, 18);
-        ctx.fillStyle = '#55cccc'; ctx.fillRect(4, 30, 3, 18);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 50, 80, 18);
+        ctx.fillStyle = '#55cccc'; ctx.fillRect(4, 50, 3, 18);
         ctx.font = '11px monospace'; ctx.fillStyle = 'rgba(150,220,220,0.8)';
-        ctx.fillText(count + ' selves', 12, 44);
+        ctx.fillText(count + ' selves', 12, 64);
     }
 
     // Objective banner
