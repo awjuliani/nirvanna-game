@@ -81,6 +81,7 @@ for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
     if (x >= 8 && x <= 11 && y >= 12) continue;
     if (DOOR_DEFS.some(d => d.x === x && d.y === y)) continue;
     if (HIDING_DEFS.some(h => h.x === x && h.y === y)) continue;
+    if (DECOR_DEFS.some(d => d.x === x && d.y === y)) continue;
     ORBITZ_CANDIDATES.push({x, y});
 }
 
