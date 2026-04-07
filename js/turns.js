@@ -39,8 +39,24 @@ export function executeTurn(input) {
         tryInteract();
     }
 
-    // Auto-pickup Orbitz
-    if (!G.hasOrbitz && G.px === G.orbX && G.py === G.orbY) G.hasOrbitz = true;
+    // Auto-pickup Orbitz — paradox if player grabs one claimed by a past self
+    let paradox = false;
+    if (!G.hasOrbitz) {
+        for (let i = 0; i < G.orbitzPositions.length; i++) {
+            if (G.orbitzPickedUp[i]) continue;
+            const orb = G.orbitzPositions[i];
+            if (G.px === orb.x && G.py === orb.y) {
+                if (G.orbitzCollected[i]) {
+                    paradox = true;
+                } else {
+                    G.hasOrbitz = true;
+                    G.currentOrbitzIdx = i;
+                    G.orbitzPickedUp[i] = true;
+                }
+                break;
+            }
+        }
+    }
 
     // Advance NPC
     G.turnCount++;
@@ -74,6 +90,16 @@ export function executeTurn(input) {
         ghost.x = s.x; ghost.y = s.y; ghost.fx = s.fx; ghost.fy = s.fy;
     }
 
+    // Ghosts pick up their respective Orbitz when they reach the position
+    for (const ghost of G.ghosts) {
+        if (!ghost.active || ghost.orbitzIdx < 0) continue;
+        if (G.orbitzPickedUp[ghost.orbitzIdx]) continue;
+        const orb = G.orbitzPositions[ghost.orbitzIdx];
+        if (ghost.x === orb.x && ghost.y === orb.y) {
+            G.orbitzPickedUp[ghost.orbitzIdx] = true;
+        }
+    }
+
     // Record player position
     G.recSamples.push({x: G.px, y: G.py, fx: G.pfx, fy: G.pfy});
 
@@ -81,7 +107,8 @@ export function executeTurn(input) {
     G.animTimer = 0;
 
     // Check detection & exit — defer until animation finishes
-    G.pendingCaught = checkDetection();
+    G.pendingCaught = checkDetection() || paradox;
+    G.caughtReason = paradox ? 'paradox' : 'seen';
     G.pendingSuccess = !G.pendingCaught && G.hasOrbitz && isAtExit();
 }
 

@@ -1,4 +1,5 @@
 'use strict';
+import { TOTAL_ORBITZ, pickMultipleOrbitzPos } from './constants.js';
 
 export const G = {
     state: 'title', round: 1, bestRound: 0,
@@ -15,13 +16,17 @@ export const G = {
     ghosts: [], recordings: [], recSamples: [],
     // Doors
     doors: [],
-    // Orbitz
-    orbX: 15, orbY: 2,
+    // Orbitz (8 persistent bottles)
+    orbitzPositions: [],       // {x,y}[] — set at game init, fixed across rounds
+    orbitzCollected: [],       // bool[] — which have been stolen in previous rounds
+    orbitzPickedUp: [],        // bool[] — which have been picked up THIS round (by ghost or player)
+    currentOrbitzIdx: -1,      // which Orbitz the player is carrying this round
     // Input
     keys: {}, spaceJust: false, inputQueue: [],
     // Deferred turn results
     pendingCaught: false,
     pendingSuccess: false,
+    caughtReason: 'seen',      // 'seen' or 'paradox'
     // Anim
     glowT: 0,
     // VHS effects
@@ -40,4 +45,6 @@ export const G = {
 export function initGame() {
     G.recordings = [];
     G.bestRound = 0;
+    G.orbitzPositions = pickMultipleOrbitzPos(TOTAL_ORBITZ);
+    G.orbitzCollected = new Array(TOTAL_ORBITZ).fill(false);
 }

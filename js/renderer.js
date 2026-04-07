@@ -1,5 +1,5 @@
 'use strict';
-import { T, COLS, ROWS, HIDING_DEFS, VIEW_SCALE, ANIM_TIME } from './constants.js';
+import { T, COLS, ROWS, HIDING_DEFS, VIEW_SCALE, ANIM_TIME, TOTAL_ORBITZ } from './constants.js';
 import { ctx } from './canvas.js';
 import { G } from './state.js';
 import { getRoomAt, lerpPos } from './utils.js';
@@ -119,8 +119,11 @@ function drawOrbitzBottle(cx, cy, s) {
 }
 
 function renderOrbitz() {
-    if (G.hasOrbitz) return;
-    drawOrbitzBottle((G.orbX + 0.5) * T, (G.orbY + 0.5) * T, 1);
+    for (let i = 0; i < G.orbitzPositions.length; i++) {
+        if (G.orbitzPickedUp[i]) continue;
+        const orb = G.orbitzPositions[i];
+        drawOrbitzBottle((orb.x + 0.5) * T, (orb.y + 0.5) * T, 1);
+    }
 }
 
 // ================================================================
@@ -245,10 +248,10 @@ function applyVHSEffects() {
 export function renderHUD() {
     // Round counter box with green accent
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(4, 4, 96, 24);
+    ctx.fillRect(4, 4, 110, 24);
     ctx.fillStyle = '#aaff00'; ctx.fillRect(4, 4, 3, 24);
     ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffffff'; ctx.fillText('Round ' + G.round, 12, 21);
+    ctx.fillStyle = '#ffffff'; ctx.fillText('Round ' + G.round + ' / ' + TOTAL_ORBITZ, 12, 21);
 
     // Step counter
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 30, 80, 18);
@@ -256,21 +259,28 @@ export function renderHUD() {
     ctx.font = '11px monospace'; ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillText('Steps: ' + G.turnCount, 12, 44);
 
+    // Orbitz progress
+    const collected = G.orbitzCollected.filter(c => c).length;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 50, 96, 18);
+    ctx.fillStyle = '#aaff00'; ctx.fillRect(4, 50, 3, 18);
+    ctx.font = '11px monospace'; ctx.fillStyle = 'rgba(170,255,0,0.8)';
+    ctx.fillText('Orbitz: ' + collected + '/' + TOTAL_ORBITZ, 12, 64);
+
     // Ghost count
     if (G.recordings.length > 0) {
         const count = G.recordings.length + 1;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 50, 80, 18);
-        ctx.fillStyle = '#55cccc'; ctx.fillRect(4, 50, 3, 18);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(4, 70, 80, 18);
+        ctx.fillStyle = '#55cccc'; ctx.fillRect(4, 70, 3, 18);
         ctx.font = '11px monospace'; ctx.fillStyle = 'rgba(150,220,220,0.8)';
-        ctx.fillText(count + ' selves', 12, 64);
+        ctx.fillText(count + ' selves', 12, 84);
     }
 
     // Objective banner
     ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
     const bannerY = H - 22;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(W / 2 - 100, bannerY - 4, 200, 20);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(W / 2 - 120, bannerY - 4, 240, 20);
     if (!G.hasOrbitz) {
-        ctx.fillStyle = 'rgba(170,255,0,0.8)'; ctx.fillText('FIND THE ORBITZ', W / 2, bannerY + 10);
+        ctx.fillStyle = 'rgba(170,255,0,0.8)'; ctx.fillText('STEAL AN UNCLAIMED ORBITZ', W / 2, bannerY + 10);
     } else {
         const p = 0.5 + 0.5 * Math.sin(G.glowT * 6);
         ctx.fillStyle = `rgba(170,255,0,${0.5 + 0.5 * p})`;
@@ -288,7 +298,7 @@ export function renderHUD() {
     if (G.bestRound > 0) {
         ctx.font = '10px monospace'; ctx.textAlign = 'right';
         ctx.fillStyle = 'rgba(170,255,0,0.4)';
-        ctx.fillText('Best: ' + G.bestRound, W - 8, H - 8);
+        ctx.fillText('Best: ' + G.bestRound + '/' + TOTAL_ORBITZ, W - 8, H - 8);
     }
 }
 
@@ -361,7 +371,7 @@ export function renderTitle() {
 export function renderIntro() {
     drawVHSBackground();
 
-    const fullLines = ['The apartment. 2008.', '', 'You need the Orbitz.', '', 'Get in. Grab it. Get out.', '', "Don't let anyone see you.", '', 'Not even yourself.'];
+    const fullLines = ['The apartment. 2008.', '', 'Eight bottles of Orbitz.', '', 'Get in. Grab one. Get out.', 'Repeat.', '', "Don't let anyone see you.", '', 'Not even yourself.'];
 
     // Typewriter effect
     let charCount = 0;
@@ -408,12 +418,15 @@ export function renderRoundIntro() {
         ctx.fillRect(bannerX + Math.random() * bannerW, bannerY - 5 + Math.random() * (bannerH + 10), 3, 1);
     }
 
-    const orbRoom = getRoomAt(G.orbX, G.orbY);
-    drawCT('The Orbitz is in the ' + (orbRoom ? orbRoom.name : 'apartment') + '.', 225, '13px monospace', 'rgba(255,255,255,0.7)');
+    const remaining = TOTAL_ORBITZ - G.orbitzCollected.filter(c => c).length;
+    drawCT(remaining + ' of ' + TOTAL_ORBITZ + ' Orbitz remain.', 225, '13px monospace', 'rgba(170,255,0,0.7)');
     if (G.recordings.length > 0) {
         drawCT((G.recordings.length + 1) + ' past selves inside.', 252, '12px monospace', 'rgba(150,220,220,0.7)');
     } else {
         drawCT('Your past self is home.', 252, '12px monospace', 'rgba(255,150,100,0.7)');
+    }
+    if (G.round > 1) {
+        drawCT("Don't take what's already yours.", 274, '11px monospace', 'rgba(255,150,100,0.5)');
     }
     if (Math.sin(G.glowT * 3) > 0) drawCT('Press any key', 340, '13px monospace', 'rgba(255,255,255,0.35)');
 }
@@ -467,8 +480,12 @@ export function renderCaught() {
         ctx.fillRect(Math.random() * W + shakeX, 170 + Math.random() * 50 + shakeY, 3, 1);
     }
 
-    drawCT('One of your past selves saw you.', 250, '13px monospace', 'rgba(255,255,255,0.7)');
-    if (G.round > 1) drawCT('Made it to round ' + G.round + '.', 275, '12px monospace', 'rgba(255,255,255,0.5)');
+    if (G.caughtReason === 'paradox') {
+        drawCT('You took an Orbitz your past self needed.', 250, '13px monospace', 'rgba(255,255,255,0.7)');
+    } else {
+        drawCT('One of your past selves saw you.', 250, '13px monospace', 'rgba(255,255,255,0.7)');
+    }
+    if (G.round > 1) drawCT('Made it to round ' + G.round + ' of ' + TOTAL_ORBITZ + '.', 275, '12px monospace', 'rgba(255,255,255,0.5)');
     drawCT('Timeline reset.', 296, '12px monospace', 'rgba(255,255,255,0.35)');
     if (Math.sin(G.glowT * 3) > 0) drawCT('Press any key', 356, '13px monospace', 'rgba(255,255,255,0.35)');
 }
@@ -484,8 +501,9 @@ export function renderSuccess() {
     ctx.fillStyle = grad;
     ctx.fillRect(W / 2 - 120, 140, 240, 120);
 
+    const collected = G.orbitzCollected.filter(c => c).length;
     drawCT('GOT OUT!', 200, 'bold 30px monospace', '#aaff00');
-    drawCT(G.round + ' bottle' + (G.round > 1 ? 's' : '') + ' collected', 238, '14px monospace', 'rgba(255,255,255,0.6)');
+    drawCT(collected + ' / ' + TOTAL_ORBITZ + ' Orbitz secured', 238, '14px monospace', 'rgba(255,255,255,0.6)');
     drawCT("But now there's another you in there...", 268, '11px monospace', 'rgba(150,220,220,0.6)');
 
     // VHS fast-forward bars
@@ -494,6 +512,37 @@ export function renderSuccess() {
         ctx.fillStyle = 'rgba(255,255,255,0.04)';
         ctx.fillRect(0, by, W, 4);
     }
+}
+
+export function renderVictory() {
+    drawVHSBackground();
+
+    // Big celebratory glow
+    const pulse = 0.5 + 0.5 * Math.sin(G.glowT * 2);
+    const grad = ctx.createRadialGradient(W / 2, 180, 10, W / 2, 180, 180);
+    grad.addColorStop(0, `rgba(170,255,0,${0.25 * pulse})`);
+    grad.addColorStop(1, 'rgba(170,255,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    drawGlitchText('ALL ORBITZ SECURED', 160, 'bold 24px monospace', '#aaff00');
+
+    // Draw a row of Orbitz bottles
+    const spacing = 50;
+    const startX = W / 2 - (TOTAL_ORBITZ - 1) * spacing / 2;
+    for (let i = 0; i < TOTAL_ORBITZ; i++) {
+        drawOrbitzBottle(startX + i * spacing, 220, 0.5);
+    }
+
+    drawCT('The timeline holds.', 275, '14px monospace', 'rgba(255,255,255,0.8)');
+    drawCT('Every version of you played their part.', 300, '12px monospace', 'rgba(150,220,220,0.6)');
+
+    // VHS timestamp
+    ctx.font = '11px monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#ff3333';
+    ctx.fillText('END', 16, H - 14);
+
+    if (Math.sin(G.glowT * 3) > 0) drawCT('Press any key', 370, '13px monospace', 'rgba(255,255,255,0.35)');
 }
 
 // ================================================================

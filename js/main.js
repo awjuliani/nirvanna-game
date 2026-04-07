@@ -2,7 +2,6 @@
 import './canvas.js';
 import './input.js';
 import { COLS, ROWS, T, ANIM_TIME } from './constants.js';
-import { pickOrbitzPos } from './constants.js';
 import { ctx } from './canvas.js';
 import { G, initGame } from './state.js';
 import { consumeScreenKey } from './input.js';
@@ -12,7 +11,7 @@ import { generateDialogue } from './dialogue.js';
 import { initSprites, rebuildMapCache } from './sprites.js';
 import {
     renderTitle, renderIntro, renderRoundIntro, renderDialogue,
-    renderGameView, renderHUD, renderCaught, renderSuccess,
+    renderGameView, renderHUD, renderCaught, renderSuccess, renderVictory,
 } from './renderer.js';
 
 // Init sprites on load
@@ -54,7 +53,6 @@ function update(dt) {
         G.typewriterIndex += dt * 30; // ~30 chars per second
         if (G.screenGuard <= 0 && consumeScreenKey()) {
             initGame(); G.round = 1;
-            const o = pickOrbitzPos(); G.orbX = o.x; G.orbY = o.y;
             rebuildMapCache();
             G.state = 'round_intro'; G.screenGuard = 0.3;
         }
@@ -69,7 +67,7 @@ function update(dt) {
         if (G.animTimer < ANIM_TIME) G.animTimer += dt;
         // After animation finishes, check deferred outcomes
         if (G.animTimer >= ANIM_TIME) {
-            if (G.pendingCaught) { G.pendingCaught = false; triggerCaught(); break; }
+            if (G.pendingCaught) { G.pendingCaught = false; triggerCaught(G.caughtReason); break; }
             if (G.pendingSuccess) { G.pendingSuccess = false; triggerSuccess(); break; }
             if (G.inputQueue.length > 0) executeTurn(G.inputQueue.shift());
         }
@@ -77,7 +75,6 @@ function update(dt) {
     case 'caught':
         if (G.screenGuard <= 0 && consumeScreenKey()) {
             initGame(); G.round = 1;
-            const o = pickOrbitzPos(); G.orbX = o.x; G.orbY = o.y;
             rebuildMapCache();
             G.state = 'round_intro'; G.screenGuard = 0.3;
         }
@@ -86,10 +83,14 @@ function update(dt) {
         G.screenTimer -= dt;
         if (G.screenTimer <= 0) {
             G.round++;
-            const o = pickOrbitzPos(); G.orbX = o.x; G.orbY = o.y;
             G.currentDialogue = generateDialogue();
             G.state = G.currentDialogue ? 'dialogue' : 'round_intro';
             G.screenGuard = 0.3;
+        }
+        break;
+    case 'victory':
+        if (G.screenGuard <= 0 && consumeScreenKey()) {
+            G.state = 'title'; G.screenGuard = 0.3;
         }
         break;
     }
@@ -109,6 +110,7 @@ function render() {
     case 'playing':    renderGameView(); renderHUD(); break;
     case 'caught':     renderGameView(); renderHUD(); renderCaught(); break;
     case 'success':    renderGameView(); renderHUD(); renderSuccess(); break;
+    case 'victory':    renderVictory(); break;
     }
 }
 

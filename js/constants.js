@@ -7,6 +7,7 @@ export const T = 32, COLS = 20, ROWS = 15;
 export const ANIM_TIME = 0.1;          // seconds for move animation lerp
 export const VIEW_SCALE = 2.0;
 export const GHOST_ENTRY_DELAY = 10;   // ticks between each ghost entering
+export const TOTAL_ORBITZ = 8;         // bottles to steal across all rounds
 
 // NPC patrol waypoints
 export const NPC_WAYPOINTS = [
@@ -87,4 +88,15 @@ for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
 
 export function pickOrbitzPos() {
     return ORBITZ_CANDIDATES[Math.floor(Math.random() * ORBITZ_CANDIDATES.length)];
+}
+
+export function pickMultipleOrbitzPos(n) {
+    const positions = [];
+    const available = [...ORBITZ_CANDIDATES];
+    for (let i = 0; i < n && available.length > 0; i++) {
+        const idx = Math.floor(Math.random() * available.length);
+        positions.push(available[idx]);
+        available.splice(idx, 1);
+    }
+    return positions;
 }

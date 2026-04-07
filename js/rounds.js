@@ -1,42 +1,52 @@
 'use strict';
 import { G } from './state.js';
-import { DOOR_DEFS, GHOST_ENTRY_DELAY } from './constants.js';
-import { pickOrbitzPos } from './constants.js';
+import { DOOR_DEFS, GHOST_ENTRY_DELAY, TOTAL_ORBITZ } from './constants.js';
 import { rebuildMapCache } from './sprites.js';
 
 export function startRound(round) {
     G.round = round;
     G.state = 'playing';
     G.hasOrbitz = false;
+    G.currentOrbitzIdx = -1;
     G.px = 9; G.py = 13; G.ppx = 9; G.ppy = 13;
     G.pfx = 0; G.pfy = -1;
     G.hidden = false;
     G.animTimer = 1; G.turnCount = 0;
     // NPC
     G.npc = {x:4, y:2, px:4, py:2, fx:1, fy:0, path:[], waypointIdx:0};
-    // Ghosts with staggered entry
+    // Ghosts with staggered entry — each knows which Orbitz it will collect
     G.ghosts = G.recordings.map((rec, i) => ({
         recording: rec, startTurn: (i + 1) * GHOST_ENTRY_DELAY,
         entered: false, active: false, recIdx: 0,
         x: 9, y: 13, px: 9, py: 13, fx: 0, fy: -1,
+        orbitzIdx: rec.orbitzIdx,
     }));
+    // All Orbitz present at start of each round; none picked up yet
+    G.orbitzPickedUp = new Array(TOTAL_ORBITZ).fill(false);
     G.doors = DOOR_DEFS.map(d => ({...d, open: true}));
-    const orb = pickOrbitzPos();
-    G.orbX = orb.x; G.orbY = orb.y;
     G.recSamples = [];
     G.inputQueue = [];
     rebuildMapCache();
 }
 
-export function triggerCaught() {
+export function triggerCaught(reason) {
     G.state = 'caught';
+    G.caughtReason = reason || 'seen';
     G.screenGuard = 0.5;
     G.screenShakeDur = 0.4;
 }
 
 export function triggerSuccess() {
-    G.recordings.push({samples: G.recSamples.slice()});
+    G.recordings.push({samples: G.recSamples.slice(), orbitzIdx: G.currentOrbitzIdx});
+    G.orbitzCollected[G.currentOrbitzIdx] = true;
     if (G.round > G.bestRound) G.bestRound = G.round;
-    G.state = 'success';
-    G.screenTimer = 1.2;
+
+    const allCollected = G.orbitzCollected.every(c => c);
+    if (allCollected) {
+        G.state = 'victory';
+        G.screenGuard = 0.5;
+    } else {
+        G.state = 'success';
+        G.screenTimer = 1.2;
+    }
 }
